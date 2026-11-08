@@ -237,9 +237,6 @@ async def limit_request_size(request: Request, call_next):
                 return JSONResponse({"detail": "Request too large"}, status_code=413)
         except ValueError:
             return JSONResponse({"detail": "Invalid content length"}, status_code=400)
-    body = await request.body()
-    if len(body) > 65536:
-        return JSONResponse({"detail": "Request too large"}, status_code=413)
     return await call_next(request)
 
 
@@ -276,6 +273,12 @@ def ingest(batch: EventBatch, request: Request):
 
     # Rate limiting is keyed by the random first-party visitor ID. No IP address is read or stored.
     now = time.monotonic()
+    if len(visitor_rate) > 10000:
+        for old_key, (window_start, _) in list(visitor_rate.items()):
+            if now - window_start >= RATE_WINDOW_SECONDS:
+                visitor_rate.pop(old_key, None)
+        if len(visitor_rate) > 10000:
+            visitor_rate.clear()
     accepted: list[tuple[Any, ...]] = []
     for event in batch.events:
         key = str(event.visitor_id)
