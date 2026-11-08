@@ -3,6 +3,7 @@ import html
 import os
 import re
 import secrets
+import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Any
@@ -226,6 +227,22 @@ app.add_middleware(
 )
 
 
+@app.middleware("http")
+async def limit_request_size(request: Request, call_next):
+    # Event batches are deliberately small; reject oversized bodies before JSON parsing.
+    length = request.headers.get("content-length")
+    if length:
+        try:
+            if int(length) > 65536:
+                return JSONResponse({"detail": "Request too large"}, status_code=413)
+        except ValueError:
+            return JSONResponse({"detail": "Invalid content length"}, status_code=400)
+    body = await request.body()
+    if len(body) > 65536:
+        return JSONResponse({"detail": "Request too large"}, status_code=413)
+    return await call_next(request)
+
+
 def check_role(expected: str) -> None:
     if ROLE != expected:
         raise HTTPException(status_code=404, detail="Not found")
@@ -258,7 +275,7 @@ def ingest(batch: EventBatch, request: Request):
         raise HTTPException(status_code=403, detail="Origin not allowed")
 
     # Rate limiting is keyed by the random first-party visitor ID. No IP address is read or stored.
-    now = asyncio.get_event_loop_policy().get_event_loop().time()
+    now = time.monotonic()
     accepted: list[tuple[Any, ...]] = []
     for event in batch.events:
         key = str(event.visitor_id)
