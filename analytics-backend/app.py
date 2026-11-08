@@ -103,6 +103,18 @@ class AnalyticsEvent(BaseModel):
     def clean_language(cls, value: str) -> str:
         return "en" if value.lower().startswith("en") else "es"
 
+    @field_validator("attributes")
+    @classmethod
+    def bound_attributes(cls, value: dict[str, Any]) -> dict[str, Any]:
+        if len(value) > 32:
+            raise ValueError("Too many event attributes")
+        for item in value.values():
+            if isinstance(item, str) and len(item) > 300:
+                raise ValueError("Event attribute too long")
+            if not isinstance(item, (str, int, float, bool, type(None))):
+                raise ValueError("Unsupported event attribute type")
+        return value
+
 
 class EventBatch(BaseModel):
     model_config = ConfigDict(extra="forbid")
