@@ -1,0 +1,85 @@
+name: roberto-analytics
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - analytics_db:/var/lib/postgresql/data
+    networks:
+      - analytics_private
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    security_opt:
+      - no-new-privileges:true
+
+  api:
+    build: .
+    restart: unless-stopped
+    environment:
+      APP_ROLE: api
+      DATABASE_URL: ${DATABASE_URL}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS}
+      RETENTION_DAYS: ${RETENTION_DAYS:-395}
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - analytics_private
+      - coolify
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=coolify
+      - traefik.http.routers.roberto-analytics-api-http.rule=Host(`data.robertomoraga.com`) && Path(`/v1/events`)
+      - traefik.http.routers.roberto-analytics-api-http.entrypoints=http
+      - traefik.http.routers.roberto-analytics-api-http.middlewares=roberto-analytics-https
+      - traefik.http.middlewares.roberto-analytics-https.redirectscheme.scheme=https
+      - traefik.http.routers.roberto-analytics-api.rule=Host(`data.robertomoraga.com`) && Path(`/v1/events`)
+      - traefik.http.routers.roberto-analytics-api.entrypoints=https
+      - traefik.http.routers.roberto-analytics-api.tls=true
+      - traefik.http.routers.roberto-analytics-api.tls.certresolver=letsencrypt
+      - traefik.http.routers.roberto-analytics-api.service=roberto-analytics-api
+      - traefik.http.services.roberto-analytics-api.loadbalancer.server.port=8000
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,noexec,nosuid
+
+  dashboard:
+    build: .
+    restart: unless-stopped
+    environment:
+      APP_ROLE: dashboard
+      DATABASE_URL: ${DATABASE_URL}
+      DASHBOARD_USER: ${DASHBOARD_USER}
+      DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD}
+      RETENTION_DAYS: ${RETENTION_DAYS:-395}
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - analytics_private
+    ports:
+      - "${DASHBOARD_BIND_IP}:${DASHBOARD_PORT}:8000"
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,noexec,nosuid
+
+networks:
+  analytics_private:
+    internal: true
+  coolify:
+    external: true
+    name: coolify
+
+volumes:
+  analytics_db:
